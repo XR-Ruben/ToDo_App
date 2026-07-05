@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskFlow - Gestor de Tareas</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- PWA Support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/906/906334.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
+                    .catch(err => console.error('Error al registrar el Service Worker:', err));
+            });
+        }
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen font-['Plus_Jakarta_Sans'] antialiased">
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        
+        <!-- HEADER -->
+        <header class="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+                <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+                    <span class="bg-indigo-600 text-white p-2.5 rounded-2xl shadow-lg shadow-indigo-200 flex items-center justify-center">
+                        <i class="fa-solid fa-list-check text-2xl"></i>
+                    </span>
+                    TaskFlow
+                </h1>
+                <p class="text-slate-500 mt-2 text-sm md:text-base">Organiza tus tareas diarias, aumenta tu productividad y alcanza tus metas.</p>
+            </div>
+            <div id="current-date" class="text-right text-sm text-slate-500 font-medium bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-100 self-start md:self-auto">
+                <!-- Se cargará por JS -->
+            </div>
+        </header>
+
+        <!-- DASHBOARD / STATS -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                <div class="p-3 bg-blue-50 text-blue-600 rounded-xl">
+                    <i class="fa-solid fa-folder-open text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Tareas</p>
+                    <h3 id="stat-total" class="text-2xl font-bold text-slate-800">0</h3>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                    <i class="fa-solid fa-clock text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pendientes</p>
+                    <h3 id="stat-pending" class="text-2xl font-bold text-slate-800">0</h3>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                    <i class="fa-solid fa-circle-check text-xl"></i>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Completadas</p>
+                    <h3 id="stat-completed" class="text-2xl font-bold text-slate-800">0</h3>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
+                <div class="flex justify-between items-center mb-1">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Progreso</p>
+                    <span id="stat-percent" class="text-xs font-bold text-indigo-600">0%</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-2">
+                    <div id="stat-progress-bar" class="bg-indigo-600 h-2 rounded-full transition-all duration-500"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MAIN CONTENT: FORM AND LIST -->
+        <main class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <!-- LEFT PANEL: ADD TASK FORM -->
+            <section class="lg:col-span-4">
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm sticky top-6">
+                    <h2 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-circle-plus text-indigo-600"></i>
+                        Crear Nueva Tarea
+                    </h2>
+                    
+                    <form id="task-form" class="space-y-4">
+                        <div>
+                            <label for="task-title" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Título de la Tarea *</label>
+                            <input type="text" id="task-title" required placeholder="Ej. Comprar insumos de oficina" 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm">
+                        </div>
+
+                        <div>
+                            <label for="task-desc" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Descripción</label>
+                            <textarea id="task-desc" rows="3" placeholder="Detalles o notas adicionales..." 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm resize-none"></textarea>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label for="task-priority" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Prioridad</label>
+                                <select id="task-priority" 
+                                    class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm bg-white">
+                                    <option value="baja" class="text-emerald-600 font-medium">Baja</option>
+                                    <option value="media" class="text-amber-600 font-medium" selected>Media</option>
+                                    <option value="alta" class="text-rose-600 font-medium">Alta</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="task-category" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Categoría</label>
+                                <select id="task-category" 
+                                    class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm bg-white">
+                                    <option value="Trabajo">💼 Trabajo</option>
+                                    <option value="Personal">🏠 Personal</option>
+                                    <option value="Compras">🛒 Compras</option>
+                                    <option value="Estudio">📚 Estudio</option>
+                                    <option value="Otros">✨ Otros</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="task-due-date" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Fecha de Vencimiento</label>
+                            <input type="date" id="task-due-date" 
+                                class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm">
+                        </div>
+
+                        <button type="submit" 
+                            class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg shadow-indigo-100 transition-all flex items-center justify-center gap-2 mt-2">
+                            <i class="fa-solid fa-plus"></i>
+                            Agregar Tarea
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- RIGHT PANEL: SEARCH, FILTERS & LIST -->
+            <section class="lg:col-span-8 flex flex-col gap-4">
+                
+                <!-- SEARCH AND FILTERS TOOLBAR -->
+                <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col gap-3">
+                    <!-- Search Bar -->
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass text-slate-400 absolute left-4 top-3.5"></i>
+                        <input type="text" id="search-input" placeholder="Buscar tareas por título o descripción..." 
+                            class="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm">
+                    </div>
+                    
+                    <!-- Quick Filters -->
+                    <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                        <div class="flex flex-wrap gap-1.5" id="status-filters">
+                            <button data-filter="all" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                Todas
+                            </button>
+                            <button data-filter="pending" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-slate-50 text-slate-600 hover:bg-slate-100 border border-transparent">
+                                Pendientes
+                            </button>
+                            <button data-filter="completed" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-slate-50 text-slate-600 hover:bg-slate-100 border border-transparent">
+                                Completadas
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <!-- Category Filter -->
+                            <select id="filter-category" title="Filtrar por categoría" class="px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none text-xs bg-white text-slate-600 font-medium">
+                                <option value="all">Todas las Categorías</option>
+                                <option value="Trabajo">💼 Trabajo</option>
+                                <option value="Personal">🏠 Personal</option>
+                                <option value="Compras">🛒 Compras</option>
+                                <option value="Estudio">📚 Estudio</option>
+                                <option value="Otros">✨ Otros</option>
+                            </select>
+
+                            <!-- Priority Filter -->
+                            <select id="filter-priority" title="Filtrar por prioridad" class="px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none text-xs bg-white text-slate-600 font-medium">
+                                <option value="all">Cualquier Prioridad</option>
+                                <option value="baja">Baja</option>
+                                <option value="media">Media</option>
+                                <option value="alta">Alta</option>
+                            </select>
+                            
+                            <!-- Sort Order -->
+                            <select id="sort-order" title="Ordenar por" class="px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none text-xs bg-white text-slate-600 font-medium">
+                                <option value="newest">Más recientes</option>
+                                <option value="oldest">Más antiguas</option>
+                                <option value="dueDate">Fecha de vencimiento</option>
+                                <option value="priority">Prioridad (Alta a Baja)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TASK LIST CONTAINER -->
+                <div class="space-y-3" id="tasks-container">
+                    <!-- Las tareas se inyectarán aquí por JavaScript -->
+                    <div class="bg-white p-12 rounded-2xl border border-slate-100 shadow-sm text-center">
+                        <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
+                            <i class="fa-solid fa-clipboard-list text-2xl"></i>
+                        </div>
+                        <h3 class="text-base font-bold text-slate-700">No hay tareas pendientes</h3>
+                        <p class="text-slate-400 text-sm mt-1">Crea una tarea para empezar a organizar tu día.</p>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <!-- EDIT MODAL -->
+    <div id="edit-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-300">
+        <div class="bg-white w-full max-w-md p-6 rounded-2xl border border-slate-100 shadow-xl m-4 transform scale-95 transition-transform duration-300" id="modal-content">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <i class="fa-solid fa-pen-to-square text-indigo-600"></i>
+                    Editar Tarea
+                </h3>
+                <button type="button" id="close-modal" title="Cerrar" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-all">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <form id="edit-form" class="space-y-4">
+                <input type="hidden" id="edit-task-id">
+                
+                <div>
+                    <label for="edit-title" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Título de la Tarea *</label>
+                    <input type="text" id="edit-title" required 
+                        class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm">
+                </div>
+
+                <div>
+                    <label for="edit-desc" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Descripción</label>
+                    <textarea id="edit-desc" rows="3" 
+                        class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm resize-none"></textarea>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label for="edit-priority" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Prioridad</label>
+                        <select id="edit-priority" 
+                            class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm bg-white">
+                            <option value="baja" class="text-emerald-600 font-medium">Baja</option>
+                            <option value="media" class="text-amber-600 font-medium">Media</option>
+                            <option value="alta" class="text-rose-600 font-medium">Alta</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="edit-category" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Categoría</label>
+                        <select id="edit-category" 
+                            class="w-full px-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm bg-white">
+                            <option value="Trabajo">💼 Trabajo</option>
+                            <option value="Personal">🏠 Personal</option>
+                            <option value="Compras">🛒 Compras</option>
+                            <option value="Estudio">📚 Estudio</option>
+                            <option value="Otros">✨ Otros</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="edit-due-date" class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Fecha de Vencimiento</label>
+                    <input type="date" id="edit-due-date" 
+                        class="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm">
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                    <button type="button" id="cancel-edit" 
+                        class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-4 rounded-xl transition-all">
+                        Cancelar
+                    </button>
+                    <button type="submit" 
+                        class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl shadow-lg shadow-indigo-100 transition-all">
+                        Guardar Cambios
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- APP JS -->
+    <script src="app.js"></script>
+</body>
+</html>
