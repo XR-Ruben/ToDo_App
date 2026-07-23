@@ -41,11 +41,48 @@ const themeToggle = document.getElementById('theme-toggle');
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     loadTasks();
+    loadFilters(); // Cargar filtros guardados
     displayCurrentDate();
     setupEventListeners();
     renderTasks();
     initNotifications();
 });
+
+// --- Funciones de persistencia de filtros ---
+function saveFilters() {
+    localStorage.setItem('taskflow_filters', JSON.stringify(currentFilters));
+}
+
+function loadFilters() {
+    const savedFilters = localStorage.getItem('taskflow_filters');
+    if (savedFilters) {
+        try {
+            currentFilters = JSON.parse(savedFilters);
+            
+            // Actualizar la UI para que coincida con los filtros cargados
+            statusFilters.forEach(button => {
+                button.classList.toggle('active-filter', button.dataset.filter === currentFilters.status);
+                // Asegurar que solo el activo tenga el estilo principal
+                if (button.dataset.filter === currentFilters.status) {
+                    button.classList.add('bg-indigo-50', 'text-indigo-700', 'border-indigo-100');
+                    button.classList.remove('bg-slate-50', 'dark:bg-slate-700', 'text-slate-600', 'dark:text-slate-300');
+                } else {
+                    button.classList.remove('bg-indigo-50', 'text-indigo-700', 'border-indigo-100');
+                    button.classList.add('bg-slate-50', 'dark:bg-slate-700', 'text-slate-600', 'dark:text-slate-300');
+                }
+            });
+
+            categoryFilter.value = currentFilters.category;
+            priorityFilter.value = currentFilters.priority;
+            sortOrder.value = currentFilters.sortBy;
+            searchInput.value = currentFilters.search;
+
+        } catch (e) {
+            console.error("Error al parsear filtros desde localStorage", e);
+        }
+    }
+}
+
 
 // Configurar la visualización de la fecha
 function initTheme() {
@@ -131,9 +168,8 @@ function setupEventListeners() {
 
     statusFilters.forEach(button => {
         button.addEventListener('click', () => {
-            statusFilters.forEach(btn => btn.classList.remove('active-filter'));
-            button.classList.add('active-filter');
             currentFilters.status = button.dataset.filter;
+            saveFilters();
             renderTasks();
         });
     });
@@ -142,12 +178,14 @@ function setupEventListeners() {
         el.addEventListener('change', (e) => {
             const filterMap = { 'filter-category': 'category', 'filter-priority': 'priority', 'sort-order': 'sortBy' };
             currentFilters[filterMap[e.target.id]] = e.target.value;
+            saveFilters();
             renderTasks();
         });
     });
 
     searchInput.addEventListener('input', (e) => {
         currentFilters.search = e.target.value.trim().toLowerCase();
+        saveFilters();
         renderTasks();
     });
 
@@ -376,13 +414,13 @@ function renderTasks() {
             </label>
             <div class="flex-1 min-w-0">
                 <div class="flex flex-col sm:flex-row sm:items-center gap-2 justify-between mb-1">
-                    <h3 class="text-base font-bold ${completedClass} wrap-break-word leading-snug">${task.title}</h3>
+                    <h3 class="text-base font-bold ${completedClass} break-words leading-snug">${task.title}</h3>
                     <div class="flex flex-wrap gap-1.5 items-center flex-shrink-0">
                         ${getPriorityBadge(task.priority)}
                         ${getCategoryBadge(task.category)}
                     </div>
                 </div>
-                ${task.desc ? `<p class="text-sm ${completedDescClass} wrap-break-word mt-1 leading-relaxed">${task.desc}</p>` : ''}
+                ${task.desc ? `<p class="text-sm ${completedDescClass} break-words mt-1 leading-relaxed">${task.desc}</p>` : ''}
                 <div class="mt-3">
                     ${formatDueDate(task.dueDate, task.dueTime, isCompleted)}
                 </div>

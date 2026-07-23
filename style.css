@@ -176,3 +176,10 @@
     opacity: 0.9;
 }
 
+@media (max-width: 360px) {
+    .btn-backup {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+}
+
