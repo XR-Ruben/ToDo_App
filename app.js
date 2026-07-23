@@ -442,3 +442,48 @@ function sendNotification(title, body) {
         new Notification(title, { body });
     }
 }
+
+
+
+// 1. Descarga tus tareas en un archivo .json (Compatible con Safari móvil)
+function exportarTareas() {
+    if (!tasks || tasks.length === 0) {
+        return alert("No tienes tareas guardadas para exportar.");
+    }
+    const dataStr = JSON.stringify(tasks, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "taskflow_backup.json";
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// 2. Lee el archivo o acepta el texto copiado de la app vieja
+function importarTareas(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const parsedTasks = JSON.parse(e.target.result);
+            
+            if (Array.isArray(parsedTasks)) {
+                // Reemplaza las tareas actuales por las importadas
+                tasks = parsedTasks; 
+                // Usa tu función original para guardar y actualizar la pantalla
+                saveTasks(); 
+                alert("¡Tareas importadas con éxito!");
+                location.reload();
+            } else {
+                alert("El formato del archivo no es un listado de tareas válido.");
+            }
+        } catch (error) {
+            alert("Error al leer el archivo de copia de seguridad.");
+        }
+    };
+    reader.readAsText(file);
+}

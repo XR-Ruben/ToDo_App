@@ -137,3 +137,42 @@
 #stat-progress-bar {
     width: 0%;
 }
+
+
+
+/*Diseño de los botones para importar y exportar tareas*/
+
+.taskflow-backup-container {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 15px 0;
+    padding: 10px;
+}
+
+.btn-backup {
+    padding: 10px 15px;
+    font-size: 14px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    -webkit-tap-highlight-color: transparent; /* Optimización para iPhone */
+}
+
+.btn-export {
+    background-color: #4a5568;
+    color: white;
+}
+
+.btn-import {
+    background-color: #3182ce;
+    color: white;
+}
+
+.btn-backup:active {
+    transform: scale(0.98); /* Efecto visual al presionar en el celular */
+    opacity: 0.9;
+}
+

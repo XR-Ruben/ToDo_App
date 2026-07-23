@@ -42,6 +42,17 @@
                     </span>
                     TaskFlow
                 </h1>
+
+                <!-- Sección de Copia de Seguridad -->
+<div class="taskflow-backup-container">
+    <button class="btn-backup btn-export" onclick="exportarTareas()">💾 Exportar Tareas</button>
+    
+    <!-- Este input está oculto, se activa al presionar el botón de importar -->
+    <input type="file" id="importFile" onchange="importarTareas(this)" style="display:none">
+    <button class="btn-backup btn-import" onclick="document.getElementById('importFile').click()">📥 Importar Tareas</button>
+</div>
+
+
                 <p class="text-slate-500 mt-2 text-sm md:text-base">Organiza tus tareas diarias, aumenta tu productividad y alcanza tus metas.</p>
             </div>
             <div class="flex items-center gap-3 self-start md:self-auto">
