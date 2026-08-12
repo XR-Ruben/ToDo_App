@@ -27,3 +27,102 @@ Abre el enlace seguro (`https://...`) de tu aplicación en tu teléfono:
   3. Confirma el nombre y pulsa **"Agregar"**.
 
 ¡Listo! Tendrás un icono de **TaskFlow** en tu pantalla de inicio que abrirá la aplicación a pantalla completa (sin barra del navegador), brindándote una experiencia idéntica a una aplicación nativa descargada de la App Store o Google Play Store.
+
+---
+
+### Notificaciones Push (configuración rápida)
+
+La aplicación está preparada para recibir notificaciones push, pero necesitas generar claves VAPID y un servidor que envíe los mensajes.
+
+- Generar claves VAPID (en tu máquina o servidor):
+
+```bash
+npm install -g web-push
+web-push generate-vapid-keys --json > vapid-keys.json
+```
+
+- Copia la clave pública al archivo `app.js` reemplazando `REPLACE_WITH_YOUR_PUBLIC_VAPID_KEY`.
+
+- Ejemplo mínimo de servidor Node para enviar notificaciones (usa el paquete `web-push`):
+
+```js
+// server.js
+const webpush = require('web-push');
+const express = require('express');
+const bodyParser = require('body-parser');
+
+const VAPID = require('./vapid-keys.json');
+webpush.setVapidDetails('mailto:tu@correo.com', VAPID.publicKey, VAPID.privateKey);
+
+const app = express();
+app.use(bodyParser.json());
+
+app.post('/send', async (req, res) => {
+  const { subscription, title, body, url, playSound } = req.body;
+  try {
+    await webpush.sendNotification(subscription, JSON.stringify({ title, body, url, playSound }));
+    res.sendStatus(201);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(3000);
+```
+
+Guarda las suscripciones de los clientes en tu servidor y usa este endpoint para enviar notificaciones programadas.
+
+Si quieres, aplico la integración del servidor aquí (archivo `server.js`) y guardo la suscripción automáticamente.
+
+---
+
+### Servidor local de prueba (opción 2)
+
+Incluí un `server.js` de ejemplo para pruebas locales con los endpoints:
+
+- `GET /vapidPublicKey` — devuelve la clave pública VAPID si existe.
+- `POST /subscribe` — guarda temporalmente una suscripción (en memoria).
+- `POST /send` — envía una notificación a la suscripción proporcionada.
+- `POST /send-stored` — envía a todas las suscripciones almacenadas en memoria.
+
+Pasos para probar localmente:
+
+1. Instala dependencias:
+
+```bash
+cd todo_app_web
+npm install
+```
+
+2. Genera claves VAPID si no las tienes:
+
+```bash
+npx web-push generate-vapid-keys --json > vapid-keys.json
+```
+
+3. Inicia el servidor:
+
+```bash
+node server.js
+```
+
+4. En otra terminal, abre tu app (por ejemplo desde el deploy Netlify) y usa la UI de suscripción. Para pruebas rápidas puedes POSTear a `/send` con una suscripción válida.
+
+Nota: `vapid-keys.json` no debe subirse a repositorios públicos si contiene la privateKey.
+
+---
+
+### Notificaciones programadas (GitHub Actions)
+
+Puedes programar notificaciones automáticas usando GitHub Actions que llamen a la función Netlify `send`.
+
+1. Añadí un workflow de ejemplo en `.github/workflows/scheduled_send.yml`.
+2. Configura los siguientes **Secrets** en tu repositorio GitHub:
+  - `SITE_URL`: URL pública de tu sitio (ej. https://mi-sitio.netlify.app)
+  - `PUSH_SUBSCRIPTION`: el JSON completo de una suscripción (puedes copiarlo desde `localStorage` después de suscribirte)
+  - Opcional: `PUSH_TITLE`, `PUSH_BODY` para personalizar el mensaje.
+
+El workflow ejecutará la función `/.netlify/functions/send` según la programación (cron) y enviará la notificación al `PUSH_SUBSCRIPTION` guardado.
+
+Advertencia: Guardar una suscripción en Secrets está bien para uso personal, pero para producción es mejor almacenar suscripciones en una DB y que la función lea desde allí.

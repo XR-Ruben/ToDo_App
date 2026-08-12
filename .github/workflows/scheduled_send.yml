@@ -1,0 +1,31 @@
+name: Scheduled Push Notifications
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # every day at 09:00 UTC (ajusta según necesites)
+  workflow_dispatch: {}
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send scheduled push to saved subscription
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }} # e.g. https://mi-sitio.netlify.app
+          PUSH_SUBSCRIPTION: ${{ secrets.PUSH_SUBSCRIPTION }} # JSON string of a subscription
+          TITLE: ${{ secrets.PUSH_TITLE }}
+          BODY: ${{ secrets.PUSH_BODY }}
+        run: |
+          if [ -z "$SITE_URL" ] || [ -z "$PUSH_SUBSCRIPTION" ]; then
+            echo "ERROR: Define los secrets SITE_URL y PUSH_SUBSCRIPTION en tu repo. PUSH_SUBSCRIPTION debe ser la suscripción JSON (sin escapar).";
+            exit 1;
+          fi
+          TITLE=${TITLE:-"Recordatorio"}
+          BODY=${BODY:-"Revisa tus tareas"}
+          echo "Enviando notificación programada a $SITE_URL/.netlify/functions/send"
+          # Construir payload fusionando el JSON de suscripción (ya en PUSH_SUBSCRIPTION)
+          PAYLOAD=$(jq -n --argjson sub "$PUSH_SUBSCRIPTION" --arg title "$TITLE" --arg body "$BODY" '{subscription: $sub, title: $title, body: $body, playSound: true}')
+          curl -s -X POST "$SITE_URL/.netlify/functions/send" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            | jq .

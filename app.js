@@ -135,8 +135,7 @@ function loadTasks() {
             dueDate: new Date().toISOString().split('T')[0],
             dueTime: '',
             completed: false,
-            createdAt: Date.now() - 100000,
-            notified: false
+            createdAt: Date.now() - 100000
         }];
         saveTasks();
     }
@@ -212,8 +211,7 @@ function handleAddTask(e) {
         dueDate: document.getElementById('task-due-date').value,
         dueTime: document.getElementById('task-due-time').value,
         completed: false,
-        createdAt: Date.now(),
-        notified: false
+        createdAt: Date.now()
     };
 
     tasks.unshift(newTask);
@@ -281,8 +279,7 @@ function handleEditTask(e) {
                 priority: document.getElementById('edit-priority').value,
                 category: document.getElementById('edit-category').value,
                 dueDate: document.getElementById('edit-due-date').value,
-                dueTime: document.getElementById('edit-due-time').value,
-                notified: false // Resetear notificación al editar
+                dueTime: document.getElementById('edit-due-time').value
             };
         }
         return task;
@@ -435,49 +432,234 @@ function renderTasks() {
 
 // --- Sistema de notificaciones ---
 function initNotifications() {
-    if (!("Notification" in window)) {
-        console.log("Este navegador no soporta notificaciones de escritorio.");
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) {
+        console.log("Notificaciones Push no son soportadas en este navegador.");
         return;
     }
-    if (Notification.permission !== "granted") {
-        Notification.requestPermission().then(permission => {
-            if (permission === "granted") {
-                console.log("Permiso de notificaciones concedido.");
-                setInterval(checkTaskDeadlines, 60000); // Revisar cada minuto
+
+    // Solicitar permiso y preparar comprobaciones locales
+    Notification.requestPermission(status => {
+        console.log('Estado del permiso de notificación:', status);
+        if (status === 'granted') {
+            setInterval(checkTaskDeadlines, 60000); // Revisar cada minuto
+        }
+    });
+
+    // Preparar registro del service worker y suscripción Push
+    if (navigator.serviceWorker) {
+        navigator.serviceWorker.ready.then(reg => {
+            window.swReg = reg;
+            initPushUI();
+        }).catch(err => console.warn('Service Worker no listo:', err));
+    }
+}
+
+// ------------------------
+// Push subscription helpers
+// ------------------------
+let VAPID_PUBLIC_KEY = null; // se intentará obtener dinámicamente
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+function initPushUI() {
+    const btn = document.getElementById('push-toggle');
+    const icon = document.getElementById('push-icon');
+    if (!btn || !window.swReg) return;
+
+    // Mostrar estado inicial
+    window.swReg.pushManager.getSubscription().then(sub => {
+        updatePushButton(sub, icon);
+    });
+
+    btn.addEventListener('click', async () => {
+        const sub = await window.swReg.pushManager.getSubscription();
+        if (sub) {
+            // Desuscribir
+            await sub.unsubscribe();
+            localStorage.removeItem('taskflow_push_subscription');
+            updatePushButton(null, icon);
+            alert('Notificaciones desactivadas');
+            return;
+        }
+
+        // Suscribirse
+        try {
+            // Obtener la clave pública VAPID si no la tenemos
+            if (!VAPID_PUBLIC_KEY) {
+                VAPID_PUBLIC_KEY = await fetchVapidPublicKey();
             }
-        });
+            if (!VAPID_PUBLIC_KEY) {
+                alert('No se pudo obtener la clave pública VAPID. Revisa el servidor o el archivo vapid-keys.json.');
+                return;
+            }
+            const subscription = await window.swReg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+            });
+            // Guardar localmente y opcionalmente enviar al servidor
+            localStorage.setItem('taskflow_push_subscription', JSON.stringify(subscription));
+            updatePushButton(subscription, icon);
+            alert('Notificaciones push activadas. Guarda la suscripción en tu servidor para enviar mensajes.');
+            // Intentar enviar la suscripción a endpoints conocidos (local o Netlify Functions)
+            postSubscriptionToServer(subscription).catch(e => console.warn('No se pudo enviar la suscripción al servidor:', e));
+        } catch (err) {
+            console.error('Error suscribiendo a push:', err);
+            alert('No se pudo activar notificaciones push. Revisa la consola.');
+        }
+    });
+
+    // Escuchar mensajes desde el SW (p. ej. reproducir timbre)
+    navigator.serviceWorker.addEventListener('message', event => {
+        if (!event.data) return;
+        if (event.data.action === 'play-sound') {
+            const url = event.data.soundUrl;
+            if (url) {
+                // Intentar reproducir mp3 si se proporciona una URL
+                try {
+                    const audio = new Audio(url);
+                    audio.play().catch(err => {
+                        console.warn('No se pudo reproducir audio mp3, usando WebAudio de respaldo', err);
+                        playSound();
+                    });
+                } catch (err) {
+                    console.warn('Error creando Audio element, usando WebAudio', err);
+                    playSound();
+                }
+            } else {
+                playSound();
+            }
+        }
+    });
+}
+
+// Intenta obtener la clave pública VAPID desde varios endpoints (local dev o Netlify Functions)
+async function fetchVapidPublicKey() {
+    // Priorizar el servidor local para evitar devolver HTML desde el servidor estático
+    const candidates = [
+        'http://localhost:3000/vapidPublicKey',
+        '/.netlify/functions/vapidPublicKey',
+        '/vapidPublicKey'
+    ];
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) {
+                console.warn('fetchVapidPublicKey: non-ok response', url, res.status);
+                continue;
+            }
+            let text = await res.text();
+            if (!text) continue;
+            text = text.trim();
+            // Si el servidor devolvió JSON { publicKey: '...' }
+            try {
+                const parsed = JSON.parse(text);
+                if (parsed && parsed.publicKey) text = parsed.publicKey;
+            } catch (e) {
+                // no es JSON, seguir
+            }
+            // Normalizar: quitar comillas envolventes y saltos de línea
+            text = text.replace(/^"(.*)"$/, '$1').replace(/\r?\n/g, '').trim();
+            // Validar que parezca una clave base64url (caracteres URL-safe)
+            if (text && text.length > 30 && /^[A-Za-z0-9\-_]+$/.test(text)) return text;
+            console.warn('fetchVapidPublicKey: respuesta no válida de', url, text.slice(0, 120));
+        } catch (err) {
+            console.warn('fetchVapidPublicKey: error fetching', url, err);
+        }
+    }
+    return null;
+}
+
+async function postSubscriptionToServer(subscription) {
+    const endpoints = [
+        '/subscribe',
+        '/.netlify/functions/save-subscription',
+        'http://localhost:3000/subscribe'
+    ];
+    for (const url of endpoints) {
+        try {
+            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(subscription) });
+            if (res.ok) return true;
+        } catch (e) {
+            // sigue
+        }
+    }
+    throw new Error('No endpoints aceptaron la suscripción');
+}
+
+function updatePushButton(subscription, iconEl) {
+    if (subscription) {
+        iconEl.classList.remove('fa-bell');
+        iconEl.classList.add('fa-bell-slash');
+        iconEl.title = 'Desactivar notificaciones';
     } else {
-        setInterval(checkTaskDeadlines, 60000); // Revisar cada minuto
+        iconEl.classList.remove('fa-bell-slash');
+        iconEl.classList.add('fa-bell');
+        iconEl.title = 'Activar notificaciones';
+    }
+}
+
+// Reproducir timbre simple usando WebAudio (no requiere archivo externo)
+function playSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = 880; // A5
+        g.gain.value = 0.001;
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start();
+        g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        setTimeout(() => { o.stop(); ctx.close(); }, 400);
+    } catch (e) {
+        console.warn('No se pudo reproducir sonido:', e);
     }
 }
 
 function checkTaskDeadlines() {
     const now = new Date();
-    tasks.forEach((task, index) => {
-        if (task.completed || !task.dueDate || !task.dueTime) return;
+    const notifiedTasks = new Set(JSON.parse(localStorage.getItem('notifiedTasks') || '[]'));
+
+    tasks.forEach(task => {
+        if (task.completed || !task.dueDate || !task.dueTime || notifiedTasks.has(task.id)) return;
 
         const dueDateTime = new Date(`${task.dueDate}T${task.dueTime}`);
         const diffMinutes = (dueDateTime.getTime() - now.getTime()) / (1000 * 60);
 
-        // Recordatorio 15 minutos antes
-        if (diffMinutes > 0 && diffMinutes <= 15 && !tasks[index].notified) {
-            sendNotification(`Recordatorio: ${task.title}`, `Esta tarea vence en menos de 15 minutos.`);
-            tasks[index].notified = true;
-            saveTasks();
-        }
-
-        // Notificación de tarea vencida
-        if (diffMinutes < 0 && !tasks[index].notified) {
-            sendNotification(`Tarea Vencida: ${task.title}`, `Esta tarea ha vencido.`);
-            tasks[index].notified = true;
-            saveTasks();
+        if (diffMinutes <= 1 && diffMinutes > -1) { // Notificar justo a tiempo
+            sendNotification(task.title, task.desc || '¡Es hora de empezar!');
+            notifiedTasks.add(task.id);
         }
     });
+    
+    localStorage.setItem('notifiedTasks', JSON.stringify([...notifiedTasks]));
 }
 
 function sendNotification(title, body) {
     if (Notification.permission === "granted") {
-        new Notification(title, { body });
+        navigator.serviceWorker.getRegistration().then(reg => {
+            if (reg) {
+                reg.showNotification(title, {
+                    body: body,
+                    icon: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
+                    vibrate: [200, 100, 200],
+                    sound: 'audiotask.mp3' // El service worker lo manejará
+                });
+            } else {
+                 new Notification(title, { body });
+            }
+        });
     }
 }
 

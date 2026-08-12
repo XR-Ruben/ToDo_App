@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin - Subscriptions</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:1rem}
+    pre{background:#f8fafc;padding:1rem;border-radius:6px;overflow:auto}
+    button{margin-right:.5rem}
+  </style>
+</head>
+<body>
+  <h1>Subscriptions</h1>
+  <p>Lista de suscripciones guardadas en <code>subscriptions.json</code>.</p>
+  <div>
+    <button id="refresh">Refrescar</button>
+    <button id="download">Descargar JSON</button>
+  </div>
+  <div id="out"><em>Cargando...</em></div>
+
+  <script>
+    async function load() {
+      const out = document.getElementById('out');
+      out.innerHTML = '<em>Cargando...</em>';
+      try {
+        const res = await fetch('/subscriptions.json');
+        if (!res.ok) { out.innerHTML = '<strong>No disponible en servidor (200 esperado).</strong>'; return; }
+        const json = await res.json();
+        if (!Array.isArray(json) || json.length===0) { out.innerHTML = '<em>No hay suscripciones guardadas.</em>'; return; }
+        const list = document.createElement('div');
+        json.forEach((s, i) => {
+          const p = document.createElement('pre');
+          p.textContent = JSON.stringify(s, null, 2);
+          list.appendChild(p);
+        });
+        out.innerHTML = '';
+        out.appendChild(list);
+        document.getElementById('download').onclick = () => {
+          const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = 'subscriptions.json';
+          document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        };
+      } catch (err) {
+        out.innerHTML = '<pre>'+err.toString()+'</pre>';
+      }
+    }
+    document.getElementById('refresh').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>

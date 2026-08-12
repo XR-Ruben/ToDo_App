@@ -183,3 +183,137 @@
     }
 }
 
+/* Responsive Design */
+@media (max-width: 768px) {
+    body {
+        -webkit-text-size-adjust: 100%; /* Previene el auto-ajuste de fuentes en iOS */
+    }
+    
+    .px-4 {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    header.mb-8 {
+        margin-bottom: 1.5rem;
+    }
+
+    h1.text-3xl {
+        font-size: 1.75rem; /* 28px */
+    }
+
+    /* Ajustar los filtros para que sean más compactos */
+    #status-filters, #filter-category, #filter-priority, #sort-order {
+        width: 100%;
+        text-align: center;
+    }
+    
+    div.gap-x-2 {
+        gap: 0.5rem;
+    }
+    
+    select#filter-category, select#filter-priority, select#sort-order {
+        flex-grow: 1; /* Permite que los selects se expandan */
+    }
+
+    .task-card {
+        padding: 1rem; /* Padding más pequeño en tarjetas */
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    /* Evitar sticky en móviles pequeños para evitar solapamientos */
+    .sticky {
+        position: static !important;
+        top: auto !important;
+    }
+    
+    .task-card .flex-1 {
+        padding-left: 0;
+        padding-top: 0.5rem;
+    }
+    
+    .task-card .ml-2 {
+        margin-left: 0;
+        padding-left: 0;
+        border-left: none;
+        padding-top: 0.75rem;
+        margin-top: 0.75rem;
+        border-top: 1px solid #e2e8f0; /* slate-200 */
+        justify-content: flex-end; /* Alinea los botones a la derecha */
+    }
+    
+    .dark .task-card .ml-2 {
+        border-top-color: #334155; /* dark:slate-700 */
+    }
+
+    #edit-modal .w-full.max-w-md {
+        margin: 1rem;
+        max-height: calc(100vh - 2rem);
+        overflow-y: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    h1.text-3xl {
+        font-size: 1.5rem; /* 24px */
+        gap: 0.75rem;
+    }
+
+    h1 .p-2.5 {
+        padding: 0.5rem;
+        border-radius: 0.75rem;
+    }
+
+    h1 .text-2xl {
+        font-size: 1.25rem;
+    }
+
+    .grid-cols-2 {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    
+    /* Forzar los stats a una sola columna */
+    section.grid.grid-cols-2 {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+
+    .p-6 {
+        padding: 1rem;
+    }
+
+    .py-2.5 {
+        padding-top: 0.6rem;
+        padding-bottom: 0.6rem;
+    }
+
+    .text-sm {
+        font-size: 0.8rem;
+    }
+}
+
+/* Afinaciones extra para pantallas muy pequeñas (<=420px) */
+@media (max-width: 420px) {
+    body {
+        font-size: 15px;
+    }
+
+    input[type="text"], input[type="date"], input[type="time"], textarea, select, button {
+        min-height: 44px; /* objetivo de accesibilidad de tamaño táctil */
+        font-size: 15px;
+    }
+
+    .action-btn, .action-btn-danger {
+        padding: 10px 12px;
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+    }
+
+    /* Espaciado general más cómodo en móviles pequeños */
+    .max-w-6xl { max-width: 100%; padding-left: 0.75rem; padding-right: 0.75rem; }
+}
+
