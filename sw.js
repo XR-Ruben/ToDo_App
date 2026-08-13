@@ -75,22 +75,39 @@ self.addEventListener('push', e => {
   self.registration.showNotification(data.title, options);
   // Si se pide que se reproduzca sonido, enviar mensaje a clientes para reproducirlo (los SW no pueden reproducir audio directamente)
   if (data.playSound) {
-    // Mantener el SW vivo mientras intentamos notificar clientes
-    e.waitUntil(
-      self.clients.matchAll({ includeUncontrolled: true, type: 'window' }).then(clients => {
-        return Promise.all(clients.map(client => {
+    // Mantener el SW vivo mientras intentamos notificar clientes y esperar confirmación
+    e.waitUntil((async () => {
+      try {
+        const clientsList = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+        const tasks = clientsList.map(client => new Promise(resolve => {
+          const channel = new MessageChannel();
+          let finished = false;
+          const timer = setTimeout(() => {
+            if (!finished) { finished = true; channel.port1.onmessage = null; resolve(false); }
+          }, 3000);
+
+          channel.port1.onmessage = (ev) => {
+            if (!finished) {
+              finished = true;
+              clearTimeout(timer);
+              channel.port1.onmessage = null;
+              resolve(true);
+            }
+          };
+
           try {
-            // Enviar opción de URL de sonido si viene en la carga
-            client.postMessage({ action: 'play-sound', soundUrl: data.soundUrl || null });
+            client.postMessage({ action: 'play-sound', soundUrl: data.soundUrl || null }, [channel.port2]);
           } catch (err) {
-            console.warn('postMessage falló para client', client && client.id, err);
+            clearTimeout(timer);
+            resolve(false);
           }
-          return Promise.resolve();
         }));
-      }).catch(err => {
+
+        await Promise.all(tasks);
+      } catch (err) {
         console.warn('clients.matchAll falló al intentar postMessage:', err);
-      })
-    );
+      }
+    })());
   }
 });
 

@@ -522,21 +522,31 @@ function initPushUI() {
         if (!event.data) return;
         if (event.data.action === 'play-sound') {
             const url = event.data.soundUrl;
-            if (url) {
-                // Intentar reproducir mp3 si se proporciona una URL
+            const replyPort = event.ports && event.ports[0];
+            (async () => {
                 try {
-                    const audio = new Audio(url);
-                    audio.play().catch(err => {
-                        console.warn('No se pudo reproducir audio mp3, usando WebAudio de respaldo', err);
+                    if (url) {
+                        try {
+                            const audio = new Audio(url);
+                            await audio.play().catch(err => {
+                                console.warn('No se pudo reproducir audio mp3, usando WebAudio de respaldo', err);
+                                playSound();
+                            });
+                        } catch (err) {
+                            console.warn('Error creando Audio element, usando WebAudio', err);
+                            playSound();
+                        }
+                    } else {
                         playSound();
-                    });
+                    }
                 } catch (err) {
-                    console.warn('Error creando Audio element, usando WebAudio', err);
-                    playSound();
+                    console.warn('Error al reproducir sonido', err);
                 }
-            } else {
-                playSound();
-            }
+                // Responder al Service Worker si se proporcionó un MessagePort
+                if (replyPort) {
+                    try { replyPort.postMessage({ ok: true }); } catch (e) { /* ignore */ }
+                }
+            })();
         }
     });
 }
