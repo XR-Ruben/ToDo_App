@@ -77,6 +77,80 @@ Si quieres, aplico la integración del servidor aquí (archivo `server.js`) y gu
 
 ---
 
+### Notificaciones Push (configuración rápida)
+
+La aplicación cuenta con un **sistema completo de notificaciones push y recordatorios**:
+
+#### ✅ Funcionalidades implementadas
+
+1. **Recordatorios de tareas programadas**: Cuando creas una tarea con fecha y hora de vencimiento, TaskFlow te notifica automáticamente **el día y hora** a la hora programada. El mensaje de la notificación incluye **el título y la descripción de la tarea**.
+
+2. **Recordatorio anticipado configurable**: El panel de configuración te permite elegir **cuántos minutos antes** del vencimiento quieres la alerta (de 0 a 30 minutos).
+
+3. **Notificación de tareas vencidas**: Habilítalo opcionalmente para recibir una alerta cuando una tarea ya venció y sigue pendiente.
+
+4. **Timbre opcional**: Activa o desactiva el **timbre de campana** (chime) de las notificaciones. Generado con WebAudio, no requiere archivos externos.
+
+5. **Vibración**: Compatible con dispositivos móviles, activable/desactivable.
+
+6. **Notificación de prueba**: Botón para enviar una notificación de prueba y verificar que todo funciona.
+
+7. **Estado en tiempo real**: Indicador en el header que muestra si las notificaciones están "Activadas", "Bloqueadas" o "Sin permiso".
+
+8. **Notificaciones Push (server)**: Cuando el navegador está cerrado, el servidor puede enviar notificaciones push a todos los suscriptores mediante `/send`, `/send-stored` o `/schedule-notification`.
+
+9. **Botón flotante en móvil**: Un botón de ⚙️ flotante en móviles abre el panel de configuración.
+
+#### 🔐 Configuración necesaria
+
+1. **Generar claves VAPID**:
+
+```bash
+cd todo_app_web
+npm install
+npx web-push generate-vapid-keys --json > vapid-keys.json
+```
+
+2. **Configurar variables de entorno** (producción):
+   - `VAPID_PUBLIC_KEY` = valor `publicKey` de `vapid-keys.json`
+   - `VAPID_PRIVATE_KEY` = valor `privateKey` de `vapid-keys.json`
+   - `VAPID_MAILTO` = tu email (ej. `mailto:tu@correo.com`)
+
+3. **Suscripción automática**: El botón 🔔 (campana) en el header solicita el permiso y registra la suscripción en el servidor local (`/subscribe`) o en Netlify Functions.
+
+#### 🖥️ Endpoints del servidor
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| `GET` | `/vapidPublicKey` | Devuelve la clave pública VAPID |
+| `POST` | `/subscribe` | Guarda una suscripción push |
+| `POST` | `/send` | Envía notificación a una suscripción |
+| `POST` | `/send-stored` | Envía a todas las suscripciones guardadas |
+| `POST` | `/schedule-notification` | Programa una notificación para una hora futura |
+| `GET` | `/scheduled-notifications` | Lista notificaciones programadas |
+| `DELETE` | `/schedule-notification/:id` | Cancela una notificación programada |
+| `POST` | `/send-to-subscription` | Envía a una suscripción específica |
+
+#### 🔄 Flujo de recordatorio de tarea
+
+1. El usuario crea una tarea con fecha/hora de vencimiento.
+2. `checkTaskDeadlines()` se ejecuta cada minuto (y al cargar la app).
+3. Cuando la tarea está dentro de la ventana de recordatorio, se muestra una notificación con el **título y descripción de la tarea**.
+4. Opcionalmente suena un **timbre** y/o vibra.
+5. Las tareas vencidas se notifican una vez (si está habilitado).
+
+#### ☁️ Notificaciones push programadas (servidor)
+
+Para enviar notificaciones cuando el navegador está cerrado, usa `/schedule-notification`:
+
+```bash
+curl -X POST http://localhost:3000/schedule-notification \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Recordatorio","body":"Revisa tu tarea","sendAt":"2025-01-01T09:00:00","playSound":true}'
+```
+
+---
+
 ### Servidor local de prueba (opción 2)
 
 Incluí un `server.js` de ejemplo para pruebas locales con los endpoints:

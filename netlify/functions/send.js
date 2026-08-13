@@ -2,7 +2,7 @@ const webpush = require('web-push');
 
 exports.handler = async function(event, context) {
   try {
-    const body = JSON.parse(event.body || '{}');
+        const body = JSON.parse(event.body || '{}');
     const subscription = body.subscription;
     const title = body.title || 'Notificación';
     const message = body.body || '';
@@ -21,7 +21,19 @@ exports.handler = async function(event, context) {
 
     if (!subscription) return { statusCode: 400, body: JSON.stringify({ error: 'subscription required' }) };
 
-    await webpush.sendNotification(subscription, JSON.stringify({ title, body: message, url, playSound }));
+    // Construir payload con todas las opciones de la notificación
+    const payload = JSON.stringify({
+        title,
+        body: message,
+        url,
+        playSound,
+        tag: body.tag || 'taskflow-push',
+        taskId: body.taskId || null,
+        vibrate: body.vibrate !== false,
+        requireInteraction: !!body.requireInteraction
+    });
+
+    await webpush.sendNotification(subscription, payload);
     return { statusCode: 201, body: JSON.stringify({ ok: true }) };
   } catch (err) {
     console.error('send error', err);

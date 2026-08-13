@@ -10,6 +10,28 @@ let currentFilters = {
     sortBy: 'newest'
 };
 
+// --- Configuración de notificaciones ---
+const DEFAULT_NOTIFICATION_SETTINGS = {
+    sound: true,          // Reproducir timbre al recibir notificación
+    vibration: true,      // Vibrar en dispositivos móviles
+    reminderMinutes: 5,   // Minutos antes del vencimiento para recordar
+    notifyOverdue: true   // Notificar tareas vencidas
+};
+
+function getNotificationSettings() {
+    try {
+        const saved = localStorage.getItem('taskflow_notification_settings');
+        if (saved) return { ...DEFAULT_NOTIFICATION_SETTINGS, ...JSON.parse(saved) };
+    } catch (e) {
+        console.warn('Error parsing notification settings', e);
+    }
+    return { ...DEFAULT_NOTIFICATION_SETTINGS };
+}
+
+function saveNotificationSettings(settings) {
+    localStorage.setItem('taskflow_notification_settings', JSON.stringify(settings));
+}
+
 // Elementos del DOM
 const taskForm = document.getElementById('task-form');
 const tasksContainer = document.getElementById('tasks-container');
@@ -46,6 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     renderTasks();
     initNotifications();
+    const settings = getNotificationSettings();
+    updateSoundToggle(settings.sound);
+    renderNotificationStatus();
+    updateNotificationSettingsUI();
 });
 
 // --- Funciones de persistencia de filtros ---
@@ -192,8 +218,16 @@ function setupEventListeners() {
     cancelEditBtn.addEventListener('click', hideEditModal);
     editForm.addEventListener('submit', handleEditTask);
 
-    editModal.addEventListener('click', (e) => { if (e.target === editModal) hideEditModal(); });
+        editModal.addEventListener('click', (e) => { if (e.target === editModal) hideEditModal(); });
     if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
+
+    // Botón de toggle de sonido (timbre)
+    const soundToggle = document.getElementById('sound-toggle');
+    if (soundToggle) soundToggle.addEventListener('click', toggleNotificationSound);
+
+    // Botón de notificación de prueba
+    const testNotificationBtn = document.getElementById('test-notification');
+    if (testNotificationBtn) testNotificationBtn.addEventListener('click', testNotification);
 }
 
 // Manejar la adición de tareas
@@ -430,28 +464,242 @@ function renderTasks() {
     });
 }
 
-// --- Sistema de notificaciones ---
-function initNotifications() {
+// --- Sistema de notificaciones Push ---
+// Inicializa el sistema de notificaciones: solicita permiso, registra el SW,
+// inicia la comprobación de vencimientos y prepara la UI de notificaciones.
+async function initNotifications() {
     if (!('serviceWorker' in navigator) || !('Notification' in window)) {
         console.log("Notificaciones Push no son soportadas en este navegador.");
         return;
     }
 
-    // Solicitar permiso y preparar comprobaciones locales
-    Notification.requestPermission(status => {
-        console.log('Estado del permiso de notificación:', status);
-        if (status === 'granted') {
-            setInterval(checkTaskDeadlines, 60000); // Revisar cada minuto
-        }
-    });
+    // Solicitar permiso de notificaciones
+    let permission = await Notification.requestPermission();
+    console.log('Estado del permiso de notificación:', permission);
+
+    if (permission === 'granted') {
+        // Iniciar el chequeo de vencimientos
+        setInterval(checkTaskDeadlines, 60000); // Revisar cada minuto
+        checkTaskDeadlines(); // Revisar inmediatamente al cargar
+    }
 
     // Preparar registro del service worker y suscripción Push
     if (navigator.serviceWorker) {
-        navigator.serviceWorker.ready.then(reg => {
+        try {
+            const reg = await navigator.serviceWorker.ready;
             window.swReg = reg;
             initPushUI();
-        }).catch(err => console.warn('Service Worker no listo:', err));
+
+            // Escuchar mensajes desde el Service Worker (para reproducir timbre)
+            navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+        } catch (err) {
+            console.warn('Service Worker no listo:', err);
+        }
     }
+}
+
+// Manejar mensajes del Service Worker (p. ej. reproducir timbre al recibir push)
+function handleServiceWorkerMessage(event) {
+    if (!event.data) return;
+
+    if (event.data.action === 'play-sound') {
+        const url = event.data.soundUrl;
+        const replyPort = event.ports && event.ports[0];
+
+        (async () => {
+            try {
+                if (url) {
+                    try {
+                        const audio = new Audio(url);
+                        await audio.play().catch(err => {
+                            console.warn('No se pudo reproducir audio mp3, usando WebAudio de respaldo', err);
+                            playSound();
+                        });
+                    } catch (err) {
+                        console.warn('Error creando Audio element, usando WebAudio', err);
+                        playSound();
+                    }
+                } else {
+                    playSound();
+                }
+            } catch (err) {
+                console.warn('Error al reproducir sonido', err);
+            }
+
+            // Responder al Service Worker si se proporcionó un MessagePort
+            if (replyPort) {
+                try { replyPort.postMessage({ ok: true }); } catch (e) { /* ignore */ }
+            }
+        })();
+    }
+}
+
+// Mostrar el estado de permisos de notificaciones en la UI
+function renderNotificationStatus() {
+    const statusEl = document.getElementById('notification-status');
+    if (!statusEl) return;
+
+    if (Notification.permission === 'granted') {
+        statusEl.innerHTML = '<i class="fa-solid fa-check text-green-500 mr-1"></i> Activadas';
+        statusEl.className = 'text-xs font-medium text-green-600 dark:text-green-400';
+    } else if (Notification.permission === 'denied') {
+        statusEl.innerHTML = '<i class="fa-solid fa-xmark text-red-500 mr-1"></i> Bloqueadas';
+        statusEl.className = 'text-xs font-medium text-red-600 dark:text-red-400';
+    } else {
+        statusEl.innerHTML = '<i class="fa-solid fa-bell-slash text-slate-400 mr-1"></i> Sin permiso';
+        statusEl.className = 'text-xs font-medium text-slate-500';
+    }
+}
+
+// Alternar sonido de notificaciones (timbre)
+function toggleNotificationSound() {
+    const settings = getNotificationSettings();
+    settings.sound = !settings.sound;
+    saveNotificationSettings(settings);
+    updateSoundToggle(settings.sound);
+    updateNotificationSettingsUI();
+}
+
+// Actualizar la UI del botón de sonido según la configuración
+function updateSoundToggle(isSoundOn) {
+    const btn = document.getElementById('sound-toggle');
+    const icon = document.getElementById('sound-icon');
+    if (!btn || !icon) return;
+
+    if (isSoundOn) {
+        icon.className = 'fa-solid fa-bell-ring';
+        btn.title = 'Desactivar timbre';
+        btn.classList.add('ring-2', 'ring-indigo-400');
+    } else {
+        icon.className = 'fa-solid fa-bell-slash';
+        btn.title = 'Activar timbre';
+        btn.classList.remove('ring-2', 'ring-indigo-400');
+    }
+}
+
+// Enviar una notificación de prueba (local y/o push)
+function testNotification() {
+    const settings = getNotificationSettings();
+
+    sendNotification('🧪 Notificación de Prueba',
+        'TaskFlow funciona correctamente. ¡Las notificaciones push están activas!',
+        {
+            tag: 'test-notification',
+            playSound: true
+        }
+    );
+
+    // Intentar enviar push a través del servidor si hay suscripción guardada
+    const sub = JSON.parse(localStorage.getItem('taskflow_push_subscription') || 'null');
+    if (sub) {
+        fetch('/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                subscription: sub,
+                title: '🚀 Push Test',
+                body: 'Notificación push de prueba desde el servidor',
+                url: '/',
+                playSound: settings.sound
+            })
+        }).catch(e => console.warn('No se pudo enviar push de prueba al servidor:', e));
+    }
+}
+
+// ===== Panel de configuración de notificaciones =====
+
+// Alternar visibilidad del panel de configuración
+function toggleNotificationSettings() {
+    const panel = document.getElementById('notification-settings');
+    if (!panel) return;
+    panel.classList.toggle('hidden');
+    updateNotificationSettingsUI();
+}
+
+// Sincronizar la UI del panel con la configuración guardada
+function updateNotificationSettingsUI() {
+    const settings = getNotificationSettings();
+
+    // Knob de sonido
+    const soundKnob = document.getElementById('sound-knob');
+    const soundToggle = document.getElementById('sound-toggle-settings');
+    if (soundKnob && soundToggle) {
+        soundKnob.style.transform = settings.sound ? 'translateX(16px)' : 'translateX(0)';
+        soundToggle.className = settings.sound
+            ? 'relative w-12 h-6 rounded-full transition-colors bg-indigo-500'
+            : 'relative w-12 h-6 rounded-full transition-colors bg-slate-200 dark:bg-slate-600';
+    }
+
+    // Knob de vibración
+    const vibKnob = document.getElementById('vibration-knob');
+    const vibToggle = document.getElementById('vibration-toggle');
+    if (vibKnob && vibToggle) {
+        vibKnob.style.transform = settings.vibration ? 'translateX(16px)' : 'translateX(0)';
+        vibToggle.className = settings.vibration
+            ? 'relative w-12 h-6 rounded-full transition-colors bg-indigo-500'
+            : 'relative w-12 h-6 rounded-full transition-colors bg-slate-200 dark:bg-slate-600';
+    }
+
+    // Knob de notificaciones vencidas
+    const overdueKnob = document.getElementById('overdue-knob');
+    const overdueToggle = document.getElementById('overdue-toggle');
+    if (overdueKnob && overdueToggle) {
+        overdueKnob.style.transform = settings.notifyOverdue ? 'translateX(16px)' : 'translateX(0)';
+        overdueToggle.className = settings.notifyOverdue
+            ? 'relative w-12 h-6 rounded-full transition-colors bg-indigo-500'
+            : 'relative w-12 h-6 rounded-full transition-colors bg-slate-200 dark:bg-slate-600';
+    }
+
+    // Slider de recordatorio
+    const reminderSlider = document.getElementById('reminder-minutes');
+    const reminderValue = document.getElementById('reminder-value');
+    if (reminderSlider) reminderSlider.value = settings.reminderMinutes;
+    if (reminderValue) reminderValue.textContent = settings.reminderMinutes;
+}
+
+// Alternar vibración
+function toggleVibration() {
+    const settings = getNotificationSettings();
+    settings.vibration = !settings.vibration;
+    saveNotificationSettings(settings);
+    updateNotificationSettingsUI();
+}
+
+// Actualizar minutos de recordatorio
+function updateReminderMinutes(value) {
+    const settings = getNotificationSettings();
+    settings.reminderMinutes = parseInt(value);
+    saveNotificationSettings(settings);
+    const reminderValue = document.getElementById('reminder-value');
+    if (reminderValue) reminderValue.textContent = value;
+}
+
+// Alternar notificaciones de tareas vencidas
+function toggleNotifyOverdue() {
+    const settings = getNotificationSettings();
+    settings.notifyOverdue = !settings.notifyOverdue;
+    saveNotificationSettings(settings);
+    updateNotificationSettingsUI();
+}
+
+// Enviar una notificación programada de prueba con el mensaje de la tarea
+function sendTestScheduledNotification() {
+    const settings = getNotificationSettings();
+    sendNotification('⏰ Recordatorio Programado',
+        settings.reminderMinutes > 0
+            ? `Notificación de prueba con recordatorio ${settings.reminderMinutes} minutos antes del vencimiento.`
+            : 'Notificación de prueba sin recordatorio anticipado.',
+        { tag: 'scheduled-test', playSound: settings.sound }
+    );
+}
+
+// Limpiar el historial de tareas notificadas (permite notificar de nuevo)
+function clearNotifiedTasks() {
+    if (!confirm('¿Estás seguro de que quieres limpiar el historial de notificaciones? Se volverán a notificar las tareas pendientes.')) return;
+    localStorage.removeItem('notifiedTasks');
+    const settings = getNotificationSettings();
+    updateNotificationSettingsUI();
+    alert('Historial de notificaciones limpiado. Las tareas pendientes se volverán a notificar.');
 }
 
 // ------------------------
@@ -487,7 +735,8 @@ function initPushUI() {
             await sub.unsubscribe();
             localStorage.removeItem('taskflow_push_subscription');
             updatePushButton(null, icon);
-            alert('Notificaciones desactivadas');
+            renderNotificationStatus();
+            alert('Notificaciones push desactivadas');
             return;
         }
 
@@ -508,7 +757,8 @@ function initPushUI() {
             // Guardar localmente y opcionalmente enviar al servidor
             localStorage.setItem('taskflow_push_subscription', JSON.stringify(subscription));
             updatePushButton(subscription, icon);
-            alert('Notificaciones push activadas. Guarda la suscripción en tu servidor para enviar mensajes.');
+            renderNotificationStatus();
+            alert('Notificaciones push activadas. ¡Listo para recibir recordatorios de tareas!');
             // Intentar enviar la suscripción a endpoints conocidos (local o Netlify Functions)
             postSubscriptionToServer(subscription).catch(e => console.warn('No se pudo enviar la suscripción al servidor:', e));
         } catch (err) {
@@ -517,42 +767,13 @@ function initPushUI() {
         }
     });
 
-    // Escuchar mensajes desde el SW (p. ej. reproducir timbre)
-    navigator.serviceWorker.addEventListener('message', event => {
-        if (!event.data) return;
-        if (event.data.action === 'play-sound') {
-            const url = event.data.soundUrl;
-            const replyPort = event.ports && event.ports[0];
-            (async () => {
-                try {
-                    if (url) {
-                        try {
-                            const audio = new Audio(url);
-                            await audio.play().catch(err => {
-                                console.warn('No se pudo reproducir audio mp3, usando WebAudio de respaldo', err);
-                                playSound();
-                            });
-                        } catch (err) {
-                            console.warn('Error creando Audio element, usando WebAudio', err);
-                            playSound();
-                        }
-                    } else {
-                        playSound();
-                    }
-                } catch (err) {
-                    console.warn('Error al reproducir sonido', err);
-                }
-                // Responder al Service Worker si se proporcionó un MessagePort
-                if (replyPort) {
-                    try { replyPort.postMessage({ ok: true }); } catch (e) { /* ignore */ }
-                }
-            })();
-        }
-    });
+    // Nota: El listener de mensajes del Service Worker ahora está en initNotifications()
 }
 
 // Intenta obtener la clave pública VAPID desde varios endpoints (local dev o Netlify Functions)
 async function fetchVapidPublicKey() {
+    // Clave VAPID publica embebida como respaldo (para funcionar sin servidor)
+    const EMBEDDED_VAPID_KEY = 'BFI_XFfTMXAWEGUH77br9ioLABEqBol7Yw-gNDe2r58Fwz9gk9Ra2x2S14n6J4s5jXgXaeoNkhBnW4d4w7ecH5Y';
     // Priorizar el servidor local para evitar devolver HTML desde el servidor estático
     const candidates = [
         'http://localhost:3000/vapidPublicKey',
@@ -582,10 +803,11 @@ async function fetchVapidPublicKey() {
             if (text && text.length > 30 && /^[A-Za-z0-9\-_]+$/.test(text)) return text;
             console.warn('fetchVapidPublicKey: respuesta no válida de', url, text.slice(0, 120));
         } catch (err) {
-            console.warn('fetchVapidPublicKey: error fetching', url, err);
+                        console.warn('fetchVapidPublicKey: error fetching', url, err);
         }
     }
-    return null;
+    // Respaldo: si ningun endpoint responde, usar la clave embebida
+    return EMBEDDED_VAPID_KEY;
 }
 
 async function postSubscriptionToServer(subscription) {
@@ -617,59 +839,153 @@ function updatePushButton(subscription, iconEl) {
     }
 }
 
-// Reproducir timbre simple usando WebAudio (no requiere archivo externo)
+// Reproducir timbre de campana agradable usando WebAudio (doble oscilador)
 function playSound() {
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'sine';
-        o.frequency.value = 880; // A5
-        g.gain.value = 0.001;
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.start();
-        g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-        setTimeout(() => { o.stop(); ctx.close(); }, 400);
+        if (ctx.state === 'suspended') ctx.resume();
+
+        const o1 = ctx.createOscillator();
+        const o2 = ctx.createOscillator();
+        const g1 = ctx.createGain();
+        const g2 = ctx.createGain();
+
+        // Acorde de campana: E5 + A5 (sonido agradable y perceptible)
+        o1.type = 'sine';
+        o1.frequency.value = 660; // E5
+        o2.type = 'sine';
+        o2.frequency.value = 880; // A5
+
+        o1.connect(g1);
+        o2.connect(g2);
+        g1.connect(ctx.destination);
+        g2.connect(ctx.destination);
+
+        g1.gain.value = 0;
+        g2.gain.value = 0;
+
+        o1.start();
+        o2.start();
+
+        // Deslizamiento suave de frecuencias para un sonido más rico
+        o1.frequency.exponentialRampToValueAtTime(620, ctx.currentTime + 0.3);
+        o2.frequency.exponentialRampToValueAtTime(840, ctx.currentTime + 0.4);
+
+        // Envelope de ataque-rápido, decaimiento-lento
+        g1.gain.setValueAtTime(0, ctx.currentTime);
+        g1.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.01);
+        g1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+
+        g2.gain.setValueAtTime(0, ctx.currentTime);
+        g2.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.05);
+        g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+
+        setTimeout(() => { o1.stop(); o2.stop(); }, 800);
+        setTimeout(() => { ctx.close(); }, 900);
     } catch (e) {
         console.warn('No se pudo reproducir sonido:', e);
     }
 }
 
+// Verificar y notificar tareas próximas a vencer o vencidas
 function checkTaskDeadlines() {
     const now = new Date();
     const notifiedTasks = new Set(JSON.parse(localStorage.getItem('notifiedTasks') || '[]'));
+    const settings = getNotificationSettings();
+    const remindBefore = settings.reminderMinutes || 5;
 
     tasks.forEach(task => {
-        if (task.completed || !task.dueDate || !task.dueTime || notifiedTasks.has(task.id)) return;
+        if (!task.dueDate || !task.dueTime) return;
 
         const dueDateTime = new Date(`${task.dueDate}T${task.dueTime}`);
-        const diffMinutes = (dueDateTime.getTime() - now.getTime()) / (1000 * 60);
+        const diffMs = dueDateTime.getTime() - now.getTime();
+        const diffMinutes = diffMs / (1000 * 60);
 
-        if (diffMinutes <= 1 && diffMinutes > -1) { // Notificar justo a tiempo
-            sendNotification(task.title, task.desc || '¡Es hora de empezar!');
+        // Notificar recordatorio: cuando la tarea vence en los próximos X minutos
+        if (!task.completed &&
+            diffMinutes <= remindBefore &&
+            diffMinutes > -remindBefore &&
+            !notifiedTasks.has(task.id)) {
+
+            const isOverdue = diffMinutes <= 0;
+            const title = isOverdue
+                ? `⚠️ ${task.title}`
+                : `Recordatorio: ${task.title}`;
+            const body = task.desc || '¡Es hora de trabajar en esta tarea!';
+
+            sendNotification(title, body, {
+                url: '/',
+                taskId: task.id,
+                tag: 'task-' + task.id,
+                playSound: true
+            });
             notifiedTasks.add(task.id);
         }
+
+        // Notificar tareas vencidas (una sola vez, si está configurado)
+        if (!task.completed &&
+            settings.notifyOverdue &&
+            diffMs < -remindBefore * 60 * 1000 &&
+            !notifiedTasks.has(task.id + '_overdue')) {
+
+            sendNotification(
+                `¡Urgente! Tarea vencida: ${task.title}`,
+                task.desc || 'Esta tarea ya venció. ¡Complétala ya!',
+                {
+                    url: '/',
+                    taskId: task.id,
+                    tag: 'overdue-' + task.id,
+                    requireInteraction: true,
+                    playSound: true
+                }
+            );
+            notifiedTasks.add(task.id + '_overdue');
+        }
     });
-    
+
     localStorage.setItem('notifiedTasks', JSON.stringify([...notifiedTasks]));
 }
 
-function sendNotification(title, body) {
-    if (Notification.permission === "granted") {
-        navigator.serviceWorker.getRegistration().then(reg => {
-            if (reg) {
-                reg.showNotification(title, {
-                    body: body,
-                    icon: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
-                    vibrate: [200, 100, 200],
-                    sound: 'audiotask.mp3' // El service worker lo manejará
-                });
-            } else {
-                 new Notification(title, { body });
+// Mostrar una notificación (local vía Service Worker) con el mensaje de la tarea
+function sendNotification(title, body, options = {}) {
+    const settings = getNotificationSettings();
+    if (Notification.permission !== "granted") return;
+
+    const notificationOptions = {
+        body: body,
+        icon: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
+        badge: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
+        tag: options.tag || 'taskflow-notification',
+        data: {
+            url: options.url || '/',
+            taskId: options.taskId || null,
+            playSound: settings.sound && (options.playSound !== false)
+        },
+        vibrate: settings.vibration ? [200, 100, 200] : [],
+        requireInteraction: options.requireInteraction || false,
+        silent: settings.sound && options.playSound !== false ? false : true
+    };
+
+    if ('serviceWorker' in navigator && window.swReg) {
+        window.swReg.showNotification(title, notificationOptions).then(() => {
+            // Reproducir timbre localmente al mostrar la notificación
+            if (notificationOptions.data.playSound) {
+                setTimeout(() => playSound(), 100);
+            }
+        }).catch(err => {
+            console.warn('Error mostrando notificación vía SW:', err);
+            // Fallback: notificación nativa
+            new Notification(title, { body: body });
+            if (notificationOptions.data.playSound) {
+                setTimeout(() => playSound(), 100);
             }
         });
+    } else {
+        // Sin Service Worker disponible
+        new Notification(title, { body: body });
+        if (notificationOptions.data.playSound) {
+            setTimeout(() => playSound(), 100);
+        }
     }
 }
 

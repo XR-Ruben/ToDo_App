@@ -63,68 +63,89 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Push Event
+// Push Event — Maneja notificaciones push desde el servidor
+// Muestra la notificación con el mensaje/tarea programada y, opcionalmente, reproduce un timbre.
 self.addEventListener('push', e => {
-    const data = e.data.json();
-  const options = {
-    body: data.body,
-    icon: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
-    vibrate: [200, 100, 200],
-    data: { url: data.url || '/', playSound: !!data.playSound }
-  };
-  self.registration.showNotification(data.title, options);
-  // Si se pide que se reproduzca sonido, enviar mensaje a clientes para reproducirlo (los SW no pueden reproducir audio directamente)
-  if (data.playSound) {
-    // Mantener el SW vivo mientras intentamos notificar clientes y esperar confirmación
-    e.waitUntil((async () => {
-      try {
-        const clientsList = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-        const tasks = clientsList.map(client => new Promise(resolve => {
-          const channel = new MessageChannel();
-          let finished = false;
-          const timer = setTimeout(() => {
-            if (!finished) { finished = true; channel.port1.onmessage = null; resolve(false); }
-          }, 3000);
+    if (!e.data) {
+        console.warn('Push recibido sin datos');
+        return;
+    }
 
-          channel.port1.onmessage = (ev) => {
-            if (!finished) {
-              finished = true;
-              clearTimeout(timer);
-              channel.port1.onmessage = null;
-              resolve(true);
+    let data;
+    try {
+        data = e.data.json();
+    } catch (err) {
+        console.warn('Push con payload no JSON:', err);
+        data = { title: 'TaskFlow', body: e.data.text() };
+    }
+
+    const options = {
+        body: data.body || '',
+        icon: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
+        badge: 'https://cdn-icons-png.flaticon.com/512/906/906334.png',
+        tag: data.tag || 'taskflow-push',
+        data: {
+            url: data.url || '/',
+            taskId: data.taskId || null,
+            playSound: !!data.playSound
+        },
+        vibrate: data.vibrate !== false ? [200, 100, 200] : [],
+        requireInteraction: data.requireInteraction || false,
+        silent: data.playSound === false
+    };
+
+    e.waitUntil(
+        self.registration.showNotification(data.title || 'TaskFlow', options)
+        .catch(err => console.warn('Error mostrando notificación push:', err))
+    );
+
+    // Si se solicita sonido, notificar a los clientes abiertos para reproducirlo
+    // (los Service Workers no pueden reproducir audio directamente)
+    if (data.playSound) {
+        e.waitUntil((async () => {
+            try {
+                const clientsList = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+                // Usar postMessage simple a todos los clientes (sin MessageChannel para mayor compatibilidad)
+                clientsList.forEach(client => {
+                    try {
+                        client.postMessage({ action: 'play-sound', soundUrl: data.soundUrl || null });
+                    } catch (err) {
+                        // Ignorar errores de postMessage
+                    }
+                });
+            } catch (err) {
+                console.warn('Error notificando a clientes para sonido:', err);
             }
-          };
-
-          try {
-            client.postMessage({ action: 'play-sound', soundUrl: data.soundUrl || null }, [channel.port2]);
-          } catch (err) {
-            clearTimeout(timer);
-            resolve(false);
-          }
-        }));
-
-        await Promise.all(tasks);
-      } catch (err) {
-        console.warn('clients.matchAll falló al intentar postMessage:', err);
-      }
-    })());
-  }
+        })());
+    }
 });
 
 // Notification Click Event
 self.addEventListener('notificationclick', e => {
     e.notification.close();
+    
+    const targetUrl = (e.notification.data && e.notification.data.url) ? e.notification.data.url : '/';
+    
+    // Cerrar todas las notificaciones con el mismo tag
+    if (e.notification.tag) {
+        e.waitUntil(
+            self.getNotifications({ tag: e.notification.tag }).then(notifications => {
+                notifications.forEach(n => n.close());
+            })
+        );
+    }
+    
+    // Enfocar o abrir la ventana con la URL de la notificación
     e.waitUntil(
-        clients.matchAll({ type: 'window' }).then(clientsArr => {
-      // Intentar enfocar una ventana existente que apunte a la URL de la notificación
-      const targetUrl = e.notification.data && e.notification.data.url ? e.notification.data.url : '/';
-      for (const windowClient of clientsArr) {
-        if (windowClient.url === targetUrl) {
-          return windowClient.focus();
-        }
-      }
-      // Si no hay una ventana abierta, abrir la URL
-      return clients.openWindow(targetUrl).then(windowClient => windowClient ? windowClient.focus() : null);
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+            for (const client of clientList) {
+                if (client.url === targetUrl && 'focus' in client) {
+                    return client.focus();
+                }
+            }
+            if (clients.openWindow) {
+                return clients.openWindow(targetUrl);
+            }
         })
     );
 });

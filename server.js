@@ -7,6 +7,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Servir archivos estáticos (index.html, app.js, style.css, sw.js, manifest.json)
+app.use(express.static(__dirname));
+
 // Cargar claves VAPID desde vapid-keys.json o variables de entorno
 const path = require('path');
 let vapid = null;
@@ -119,6 +122,112 @@ app.post('/send-stored', async (req, res) => {
     }
   }
   res.json(results);
+});
+
+// === Notificaciones Programadas ===
+// Almacen en memoria para notificaciones programadas
+let scheduledNotifications = [];
+
+// Verificar cada minuto si hay notificaciones programadas para enviar
+setInterval(async () => {
+    const now = Date.now();
+    const due = scheduledNotifications.filter(n => n.sendAt <= now && !n.sent);
+
+    for (const n of due) {
+        n.sent = true;
+        if (!vapid.publicKey || !vapid.privateKey) {
+            console.warn('No se pueden enviar notificaciones programadas: VAPID no configurado');
+            continue;
+        }
+        const payload = JSON.stringify({
+            title: n.title || 'Recordatorio',
+            body: n.body || '',
+            url: n.url || '/',
+            playSound: !!n.playSound,
+            tag: n.tag || 'scheduled'
+        });
+        for (const sub of subscriptions) {
+            try {
+                await webpush.sendNotification(sub, payload);
+                console.log('Notificación programada enviada:', n.title);
+            } catch (err) {
+                console.error('Error enviando notificación programada:', err.message);
+            }
+        }
+    }
+
+    // Limpiar historial: mantener solo las últimas 50 notificaciones enviadas
+    const sent = scheduledNotifications.filter(n => n.sent);
+    const pending = scheduledNotifications.filter(n => !n.sent);
+    scheduledNotifications = [...sent.slice(-50), ...pending];
+}, 60000);
+
+// Endpoint para programar una notificación push
+app.post('/schedule-notification', (req, res) => {
+    const { title, body, url, playSound, sendAt, remindMinutes } = req.body;
+    if (!title) return res.status(400).json({ error: 'title required' });
+
+    // Calcular cuándo enviar
+    let when;
+    if (sendAt) {
+        when = new Date(sendAt).getTime();
+    } else if (remindMinutes && remindMinutes > 0) {
+        when = Date.now() + remindMinutes * 60 * 1000;
+    } else {
+        when = Date.now(); // Enviar inmediatamente
+    }
+
+    const scheduled = {
+        id: Date.now().toString(),
+        title: title,
+        body: body || '',
+        url: url || '/',
+        playSound: !!playSound,
+        tag: 'scheduled',
+        sendAt: when,
+        sent: false,
+        createdAt: Date.now()
+    };
+
+    scheduledNotifications.push(scheduled);
+    res.status(201).json({ ok: true, scheduledFor: new Date(when).toISOString() });
+});
+
+// Listar notificaciones programadas
+app.get('/scheduled-notifications', (req, res) => {
+    res.json(scheduledNotifications);
+});
+
+// Cancelar una notificación programada
+app.delete('/schedule-notification/:id', (req, res) => {
+    const id = req.params.id;
+    const idx = scheduledNotifications.findIndex(n => n.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Not found' });
+    scheduledNotifications.splice(idx, 1);
+    res.json({ ok: true });
+});
+
+// Endpoint para enviar notificación a una suscripción específica
+app.post('/send-to-subscription', async (req, res) => {
+    const { subscription, title, body, url, playSound } = req.body;
+    if (!subscription) return res.status(400).json({ error: 'subscription required' });
+    if (!vapid.publicKey || !vapid.privateKey) return res.status(500).json({ error: 'VAPID keys not configured' });
+
+    webpush.setVapidDetails(vapid.mailto, vapid.publicKey, vapid.privateKey);
+    const payload = JSON.stringify({
+        title: title || 'Notificación',
+        body: body || '',
+        url: url || '/',
+        playSound: !!playSound
+    });
+
+    try {
+        await webpush.sendNotification(subscription, payload);
+        res.status(201).json({ ok: true });
+    } catch (err) {
+        console.error('send error', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 const port = process.env.PORT || 3000;

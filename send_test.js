@@ -27,7 +27,7 @@ if (!Array.isArray(subs) || subs.length === 0) {
   process.exit(1);
 }
 
-const payload = JSON.stringify({ title: 'Prueba desde CLI', body: 'Notificación enviada con send_test.js', url: '/', playSound: true });
+const payload = JSON.stringify({ title: 'Prueba desde CLI', body: 'Notificación enviada con send_test.js', url: '/', playSound: true, tag: 'cli-test' });
 
 (async () => {
   for (const s of subs) {
